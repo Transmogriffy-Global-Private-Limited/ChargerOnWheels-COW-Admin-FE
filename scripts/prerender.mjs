@@ -53,7 +53,7 @@ async function main() {
     throw new Error('dist/ not found. Run "vite build" first.');
   }
 
-  // Serve the built site locally
+  // Serve the built site locally so that we can prerender it.We use npx vite preview to serve the site,which is a cross platform way 
 //   const preview = spawn(
 //     process.platform === "win32" ? "npx.cmd" : "npx",
 //     ["vite", "preview", "--strictPort", "--host", "127.0.0.1", "--port", PREVIEW_PORT],

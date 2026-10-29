@@ -1,475 +1,609 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { jwtDecode } from "jwt-decode";
-import { 
-  FaEnvelope, 
-  FaLock, 
-  FaEye, 
-  FaEyeSlash,
-  FaArrowRight,
-  FaShieldAlt,
-  FaCheckCircle,
-  FaExclamationCircle,
-  FaSpinner,
-  FaKey,
-  FaUserShield,
-  FaArrowLeft
+import {
+  FaEnvelope, FaLock, FaEye, FaEyeSlash, FaArrowRight, FaShieldAlt,
+  FaCheckCircle, FaExclamationCircle, FaSpinner, FaKey, FaUserShield,
+  FaArrowLeft, FaBolt, FaLeaf, FaRedo,
 } from "react-icons/fa";
-import loginImage from "../../assets/new3.jpg";
+import loginImage from "../../assets/login.png";
 
-const BASE_URL = "https://api.static.ev.transev.site";
-const API_KEY = "mlzuMoRFjdGhcFulLMaVtfwNAHycbBAf";
+/* ==================== INLINE API LAYER ==================== */
+const BASE_URL    = "https://dev-evcowbbe.transev.site";
+const ACCESS_KEY  = "access_token";
+const REFRESH_KEY = "refresh_token";
+const USER_KEY    = "admin_user";
 
+async function apiRequest(path, { method = "GET", body, auth = false } = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  };
+  if (auth) {
+    const t = localStorage.getItem(ACCESS_KEY);
+    if (t) headers.Authorization = `Bearer ${t}`;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  console.log(
+    "%c[API →] " + method + " " + path,
+    "color:#10b981;font-weight:bold",
+    "\n  auth:", auth,
+    "\n  body:", body !== undefined ? JSON.stringify(body) : "(no body)"
+  );
+
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method, headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch {
+    clearTimeout(timer);
+    const e = new Error(
+      "Network / CORS error — cannot reach the API. Ask backend to allow origin " +
+        window.location.origin + "."
+    );
+    e.isNetworkError = true;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const ct = res.headers.get("content-type") || "";
+  let data = null;
+  if (ct.includes("application/json")) {
+    try { data = await res.json(); } catch { data = null; }
+  } else {
+    try { data = await res.text(); } catch { data = null; }
+  }
+
+  // Unwrap { data: {...} } only when there's no error key
+  if (
+    data && typeof data === "object" && !Array.isArray(data) &&
+    "data" in data && !("error" in data) &&
+    Object.keys(data).length <= 2
+  ) {
+    data = data.data;
+  }
+
+  if (!res.ok) {
+    const msg =
+      (data &&
+        (data.message ||
+          data.error?.message ||
+          (typeof data.error === "string" ? data.error : null) ||
+          data.detail)) ||
+      `Request failed with status ${res.status}`;
+    const e = new Error(msg);
+    e.status     = res.status;
+    e.code       = data?.error?.code || data?.code;
+    e.requestId  = data?.error?.request_id;
+    e.body       = data;
+    e.retryAfter = Number(res.headers.get("Retry-After")) || null;
+    throw e;
+  }
+
+  return data;
+}
+
+function saveSession(payload) {
+  const find = (obj, keys, depth = 4) => {
+    if (!obj || typeof obj !== "object" || depth < 0) return null;
+    for (const k of keys) if (typeof obj[k] === "string" && obj[k].trim()) return obj[k];
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === "object") {
+        const f = find(v, keys, depth - 1);
+        if (f) return f;
+      }
+    }
+    return null;
+  };
+  const access = find(payload, [
+    "access_token","accessToken","access","token","jwt","id_token","idToken","bearer",
+  ]);
+  const refresh = find(payload, ["refresh_token","refreshToken","refresh"]);
+  const user =
+    payload.user ||
+    payload.admin ||
+    (payload.id && payload.email ? payload : null) ||
+    payload.data?.user ||
+    payload.data?.admin ||
+    (payload.data?.id && payload.data?.email ? payload.data : null);
+
+  if (access)  localStorage.setItem(ACCESS_KEY,  access);
+  if (refresh) localStorage.setItem(REFRESH_KEY, refresh);
+  if (user)    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  return { access, refresh, user };
+}
+
+function extractChallengeId(res) {
+  if (!res || typeof res !== "object") return null;
+  return (
+    res.challenge_id ||
+    res.challengeId ||
+    res.data?.challenge_id ||
+    res.data?.challengeId ||
+    null
+  );
+}
+
+function detectOtp(res) {
+  if (!res || typeof res !== "object") return false;
+  const keys = [
+    "requires_otp","requiresOtp","otp_required","otpRequired",
+    "two_factor_required","twoFactorRequired","two_factor",
+    "requires_2fa","requires2FA","mfa_required","mfaRequired",
+  ];
+  for (const k of keys) if (res[k]) return true;
+  if (res.challenge === "otp" || res.challenge === "2fa" || res.challenge === "LOGIN_2FA") return true;
+  if (res.data && typeof res.data === "object") {
+    for (const k of keys) if (res.data[k]) return true;
+    if (res.data.challenge === "otp" || res.data.challenge === "2fa" || res.data.challenge === "LOGIN_2FA") return true;
+  }
+  // Fallback: if a challenge_id is present but no access_token, it's a 2FA challenge
+  if (extractChallengeId(res) && !res.access_token && !res.data?.access_token) return true;
+  return false;
+}
+
+/* Fetch profile after login so the layout shows correct user */
+async function fetchAndSaveUser() {
+  try {
+    const meRes = await apiRequest("/api/v1/admin/me", { auth: true });
+    const u = meRes?.user || meRes?.admin || meRes?.data?.user || meRes?.data || meRes;
+    if (u && (u.id || u.email)) {
+      localStorage.setItem(USER_KEY, JSON.stringify(u));
+      console.log("[me] ✅ user saved:", u);
+    }
+  } catch (err) {
+    console.warn("[me] failed to fetch user (non-fatal):", err?.message);
+  }
+}
+
+/* ==================== COMPONENT ==================== */
 const LoginPage = () => {
-  const [formData, setFormData] = useState({ email: "", password: "" });
-  const [otpData, setOtpData] = useState({ otp_code: "" });
-  const [error, setError] = useState(null);
-  const [showOtpForm, setShowOtpForm] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
-  const [authToken, setAuthToken] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
-
   const navigate = useNavigate();
 
-  const decodeAndStoreUser = (token) => {
-    try {
-      const decoded = jwtDecode(token);
-      console.log("🔐 Decoded Token:", decoded);
-      
-      if (decoded?.user_id) {
-        localStorage.setItem("user_id", decoded.user_id);
-        console.log("Decoded user ID:", decoded.user_id);
-      }
-      
-      // ⭐⭐⭐ Extract role from token ⭐⭐⭐
-      let userRole = 'admin'; // Default for admin login
-      
-      // Check role from token if available
-      if (decoded?.role === 'admin' || decoded?.role === 'Admin' || decoded?.role === 'ADMIN') {
-        userRole = 'admin';
-      } else if (decoded?.user_type === 'admin') {
-        userRole = 'admin';
-      } else if (decoded?.is_admin === true) {
-        userRole = 'admin';
-      }
-      
-      // ⭐⭐⭐ CRITICAL: Store role in localStorage ⭐⭐⭐
-      localStorage.setItem("user_role", userRole);
-      console.log("✅ Stored user_role in localStorage:", userRole);
-      
-      // Store login timestamp
-      localStorage.setItem("login_timestamp", Date.now().toString());
-      
-    } catch (err) {
-      console.error("Error decoding token:", err);
-      // Fallback: set role as admin
-      localStorage.setItem("user_role", "admin");
+  const [formData, setFormData]               = useState({ email: "", password: "" });
+  const [otpCode, setOtpCode]                 = useState("");
+  const [challengeId, setChallengeId]         = useState(null);   // LOGIN_2FA challenge
+  const [error, setError]                     = useState(null);
+  const [errorHint, setErrorHint]             = useState(null);
+  const [info, setInfo]                       = useState(null);
+  const [showOtpForm, setShowOtpForm]         = useState(false);
+  const [userEmail, setUserEmail]             = useState("");
+  const [isLoading, setIsLoading]             = useState(false);
+  const [isResending, setIsResending]         = useState(false);
+  const [resendCooldown, setResendCooldown]   = useState(0);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [showPassword, setShowPassword]       = useState(false);
+  const [rememberMe, setRememberMe]           = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("remember_email");
+    if (saved) {
+      setFormData((f) => ({ ...f, email: saved }));
+      setRememberMe(true);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === "otp_code") {
-      setOtpData({ ...otpData, [name]: value });
+    if (name === "otp_code") setOtpCode(value.replace(/\D/g, "").slice(0, 6));
+    else setFormData({ ...formData, [name]: value });
+  };
+
+  const surfaceError = (err) => {
+    setError(err?.message || "Something went wrong. Please try again.");
+
+    if (err?.isNetworkError) {
+      setErrorHint(
+        "Network / CORS error — cannot reach the API. " +
+          `Ask backend to allow origin ${window.location.origin}.`
+      );
+    } else if (err?.code === "RATE_LIMITED" && err.retryAfter) {
+      setResendCooldown(err.retryAfter);
+      setErrorHint(`Too many attempts. Please wait ${err.retryAfter}s.`);
+    } else if (err?.status === 401) {
+      setErrorHint("Wrong email/password or OTP has expired.");
+    } else if (err?.status === 403) {
+      setErrorHint("This challenge does not belong to the admin plane.");
     } else {
-      setFormData({ ...formData, [name]: value });
+      setErrorHint(null);
     }
   };
 
+  const goToDashboard = () => {
+    setShowSuccessPopup(true);
+    setTimeout(() => navigate("/dashboard", { replace: true }), 800);
+  };
+
+  /* ---------- LOGIN ---------- */
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(null);
+    setError(null); setErrorHint(null); setInfo(null);
     setIsLoading(true);
 
     try {
-      console.log("🟢 Attempting admin login...");
-      const response = await fetch(`${BASE_URL}/admin/login`, {
+      const res = await apiRequest("/api/v1/admin/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "API-Key": API_KEY,
-        },
-        body: JSON.stringify(formData),
+        body: { email: formData.email, password: formData.password },
+        auth: false,
       });
+      console.log("[login] response:", res);
 
-      const authorizationHeader = response.headers.get("Authorization");
-
-      if (authorizationHeader?.startsWith("Bearer ")) {
-        const token = authorizationHeader.substring(7);
-        localStorage.setItem("auth_token", token);
-        setAuthToken(token);
-        decodeAndStoreUser(token);
-      }
-
-      if (response.status === 308) {
-        console.log("🟢 2FA required");
+      // 2FA challenge?
+      if (detectOtp(res)) {
+        const cid = extractChallengeId(res);
         setUserEmail(formData.email);
+        setChallengeId(cid);
         setShowOtpForm(true);
-      } else if (response.ok) {
-        console.log("✅ Admin login successful!");
-        
-        // Ensure role is set even if not from token
-        if (!localStorage.getItem("user_role")) {
-          localStorage.setItem("user_role", "admin");
+        setResendCooldown(60);
+        setInfo("A verification code has been sent to your email.");
+        if (!cid) {
+          console.warn(
+            "[login] ⚠️ No challenge_id found in login response. " +
+            "/verify-otp will fail unless backend returns one."
+          );
         }
-        
-        setShowSuccessPopup(true);
-        setTimeout(() => {
-          navigate("/admin/dashboard");
-        }, 1500);
-      } else {
-        const data = await response.json();
-        setError(data.message || "Login failed.");
+        return;
       }
+
+      saveSession(res || {});
+
+      const savedToken = localStorage.getItem(ACCESS_KEY);
+      if (!savedToken) {
+        console.error("[login] No access_token in localStorage. Response:", res);
+        setError("Login succeeded but no token was returned.");
+        return;
+      }
+
+      if (rememberMe) localStorage.setItem("remember_email", formData.email);
+      else localStorage.removeItem("remember_email");
+
+      await fetchAndSaveUser();
+      goToDashboard();
     } catch (err) {
-      console.error("Login error:", err);
-      setError("An error occurred during login.");
+      surfaceError(err);
     } finally {
       setIsLoading(false);
     }
   };
 
+  /* ---------- VERIFY OTP — { challenge_id, code } per Swagger ---------- */
   const handleOtpSubmit = async (e) => {
     e.preventDefault();
-    setError(null);
+    setError(null); setErrorHint(null); setInfo(null);
+
+    if (!challengeId) {
+      setError("No challenge ID. Please sign in again.");
+      setErrorHint("Backend /login must return challenge_id for 2FA.");
+      return;
+    }
+    if (!/^\d{6}$/.test(otpCode)) {
+      setError("Please enter a valid 6-digit code.");
+      return;
+    }
+
     setIsLoading(true);
-
     try {
-      const token = localStorage.getItem("auth_token");
-
-      console.log("🟢 Verifying OTP...");
-      const response = await fetch(`${BASE_URL}/admin/2fa/verify`, {
+      const res = await apiRequest("/api/v1/admin/auth/verify-otp", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "API-Key": API_KEY,
+        body: {
+          challenge_id: challengeId,   // ✅ required per Swagger
+          code:         otpCode,       // ✅ field name is "code", not "otp_code"
         },
-        body: JSON.stringify({
-          email: userEmail,
-          otp_code: otpData.otp_code,
-        }),
+        auth: false,
       });
+      console.log("[verify-otp] response:", res);
 
-      const authorizationHeader = response.headers.get("Authorization");
+      saveSession(res || {});
 
-      if (authorizationHeader?.startsWith("Bearer ")) {
-        const newToken = authorizationHeader.substring(7);
-        localStorage.setItem("auth_token", newToken);
-        setAuthToken(newToken);
-        decodeAndStoreUser(newToken);
+      const savedToken = localStorage.getItem(ACCESS_KEY);
+      if (!savedToken) {
+        console.error("[otp] No access_token saved after verify.");
+        setError("OTP verified but no session token was returned.");
+        return;
       }
 
-      if (response.ok) {
-        console.log("✅ OTP verified successfully!");
-        
-        // Ensure role is set
-        if (!localStorage.getItem("user_role")) {
-          localStorage.setItem("user_role", "admin");
-        }
-        
-        setShowSuccessPopup(true);
-        setTimeout(() => {
-          navigate("/admin/dashboard");
-        }, 1500);
-      } else {
-        const data = await response.json();
-        setError(data.message || "OTP verification failed.");
-      }
+      await fetchAndSaveUser();
+      goToDashboard();
     } catch (err) {
-      console.error("OTP error:", err);
-      setError("An error occurred during OTP verification.");
+      surfaceError(err);
     } finally {
       setIsLoading(false);
     }
   };
 
+  /* ---------- RESEND LOGIN OTP ---------- */
+  const handleResend = async () => {
+    if (resendCooldown > 0 || isResending) return;
+    setIsResending(true);
+    setError(null); setErrorHint(null); setInfo(null);
+    try {
+      await apiRequest("/api/v1/admin/auth/2fa/resend", {
+        method: "POST",
+        body: { email: userEmail },
+        auth: false,
+      });
+      setInfo("A new verification code has been sent.");
+      setResendCooldown(60);
+    } catch (err) {
+      surfaceError(err);
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const backToLogin = () => {
+    setShowOtpForm(false);
+    setError(null); setErrorHint(null); setInfo(null);
+    setOtpCode("");
+    setChallengeId(null);
+  };
+
+  const ErrorBox = () =>
+    error && (
+      <div className="p-3 bg-rose-500/20 border border-rose-300/40 rounded-xl backdrop-blur-md animate-shake">
+        <div className="flex items-start gap-2">
+          <FaExclamationCircle className="text-rose-200 shrink-0 mt-0.5" size={14} />
+          <div className="text-left">
+            <p className="text-rose-50 text-sm font-semibold leading-snug">{error}</p>
+            {errorHint && (
+              <p className="text-rose-100/80 text-[11px] mt-1 leading-snug">{errorHint}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center bg-cover bg-center bg-no-repeat relative"
+    <div
+      className="relative min-h-screen w-full bg-cover bg-center bg-no-repeat bg-fixed"
       style={{ backgroundImage: `url(${loginImage})` }}
     >
-      {/* Dark Overlay for better readability */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
-      
-      {/* Decorative Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-white/10 rounded-full blur-3xl"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-white/10 rounded-full blur-3xl"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl"></div>
-      </div>
+      <div className="absolute inset-0 bg-gradient-to-l from-emerald-950/70 via-emerald-900/30 to-transparent" />
 
-      {/* Main Card */}
-      <div className="relative w-full max-w-md mx-4 bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl overflow-hidden animate-fadeInUp">
-        
-        {/* Card Header with Gradient */}
-        <div className="relative bg-gradient-to-r from-purple-600 via-pink-600 to-purple-600 px-6 py-8 text-center">
-          <div className="absolute top-0 left-0 w-full h-full opacity-10">
-            <div className="absolute top-0 left-0 w-40 h-40 bg-white rounded-full -translate-x-20 -translate-y-20"></div>
-            <div className="absolute bottom-0 right-0 w-40 h-40 bg-white rounded-full translate-x-20 translate-y-20"></div>
+      <header className="relative z-20 flex items-center justify-between px-5 sm:px-8 pt-6">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center border border-white/30 shadow-xl">
+            <FaBolt className="text-emerald-300 text-lg" />
           </div>
-          
-          <div className="relative z-10">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 rounded-2xl backdrop-blur-sm mb-4 shadow-lg">
-              {!showOtpForm ? (
-                <FaUserShield className="text-white text-3xl" />
-              ) : (
-                <FaKey className="text-white text-3xl" />
-              )}
-            </div>
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
-              {!showOtpForm ? "Welcome Back!" : "Two-Factor Authentication"}
-            </h2>
-            <p className="text-white/80 text-sm">
-              {!showOtpForm 
-                ? "Sign in to your admin account" 
-                : "Enter the verification code sent to your email"}
+          <div>
+            <h1 className="text-white text-base sm:text-lg font-black tracking-tight drop-shadow-lg">
+              Charger on Wheels
+            </h1>
+            <p className="text-emerald-200/90 text-[10px] sm:text-xs font-medium">
+              EV Charging, Anytime Anywhere
             </p>
           </div>
         </div>
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20">
+          <FaLeaf className="text-emerald-300 text-[10px]" />
+          <span className="text-white text-[11px] font-semibold">Green. Smart. On-demand.</span>
+        </div>
+      </header>
 
-        {/* Card Body */}
-        <div className="p-6 md:p-8">
-          {/* Success Popup */}
-          {showSuccessPopup && (
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3 animate-slideDown">
-              <FaCheckCircle className="text-green-600" size={20} />
-              <div>
-                <p className="text-green-700 font-medium">Login Successful!</p>
-                <p className="text-green-600 text-sm">Redirecting to admin dashboard...</p>
-              </div>
-            </div>
-          )}
-
-          {!showOtpForm ? (
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email Field */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Email Address
-                </label>
-                <div className="relative group">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-purple-500 transition-colors">
-                    <FaEnvelope size={18} />
-                  </div>
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    placeholder="admin@example.com"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-gray-50 focus:bg-white"
-                    required
-                  />
+      <main className="relative z-10 min-h-[calc(100vh-88px)] flex items-end justify-end px-4 sm:px-8 lg:px-16 pt-8 pb-10">
+        <div className="w-full max-w-md animate-fadeInUp">
+          <div className="relative rounded-3xl overflow-hidden border border-white/25 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-emerald-950/40">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/15 via-white/5 to-transparent pointer-events-none" />
+            <div className="relative p-6 sm:p-8">
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/40 mb-3">
+                  {!showOtpForm ? (
+                    <FaUserShield className="text-white text-2xl" />
+                  ) : (
+                    <FaKey className="text-white text-2xl" />
+                  )}
                 </div>
+                <h2 className="text-2xl font-black text-white tracking-tight drop-shadow-md">
+                  {!showOtpForm ? "Welcome Back!" : "2FA Verification"}
+                </h2>
+                <p className="text-emerald-100/90 text-sm mt-1">
+                  {!showOtpForm
+                    ? "Sign in to your admin account"
+                    : `Code sent to ${userEmail}`}
+                </p>
               </div>
 
-              {/* Password Field */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Password
-                </label>
-                <div className="relative group">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-purple-500 transition-colors">
-                    <FaLock size={18} />
+              {showSuccessPopup && (
+                <div className="mb-5 p-3.5 bg-emerald-500/20 border border-emerald-300/40 rounded-xl flex items-center gap-3 animate-slideDown backdrop-blur-md">
+                  <FaCheckCircle className="text-emerald-300 shrink-0" size={18} />
+                  <div>
+                    <p className="text-white font-semibold text-sm">Login Successful!</p>
+                    <p className="text-emerald-100 text-xs">Redirecting…</p>
                   </div>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    name="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    placeholder="Enter your password"
-                    className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-gray-50 focus:bg-white"
-                    required
-                  />
+                </div>
+              )}
+
+              {info && !showSuccessPopup && (
+                <div className="mb-4 p-3 bg-emerald-500/15 border border-emerald-300/30 rounded-xl flex items-center gap-2 backdrop-blur-md">
+                  <FaCheckCircle className="text-emerald-300 shrink-0" size={14} />
+                  <span className="text-emerald-50 text-xs">{info}</span>
+                </div>
+              )}
+
+              {!showOtpForm ? (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-100/90 mb-1.5">
+                      Email Address
+                    </label>
+                    <div className="relative group">
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-200/80 group-focus-within:text-emerald-300 transition-colors">
+                        <FaEnvelope size={16} />
+                      </div>
+                      <input
+                        type="email" name="email" value={formData.email}
+                        onChange={handleChange}
+                        placeholder="admin@chargerwheels.com"
+                        className="w-full pl-11 pr-4 py-3 border border-white/25 rounded-xl bg-white/10 text-white placeholder-emerald-100/60 focus:outline-none focus:ring-2 focus:ring-emerald-300/60 focus:border-emerald-300/80 focus:bg-white/15 transition-all text-sm backdrop-blur-md"
+                        required autoComplete="email"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-100/90 mb-1.5">
+                      Password
+                    </label>
+                    <div className="relative group">
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-200/80 group-focus-within:text-emerald-300 transition-colors">
+                        <FaLock size={16} />
+                      </div>
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        name="password" value={formData.password}
+                        onChange={handleChange}
+                        placeholder="Enter your password"
+                        className="w-full pl-11 pr-12 py-3 border border-white/25 rounded-xl bg-white/10 text-white placeholder-emerald-100/60 focus:outline-none focus:ring-2 focus:ring-emerald-300/60 focus:border-emerald-300/80 focus:bg-white/15 transition-all text-sm backdrop-blur-md"
+                        required autoComplete="current-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-emerald-200/80 hover:text-emerald-300 transition-colors"
+                      >
+                        {showPassword ? <FaEyeSlash size={16} /> : <FaEye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox" checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="w-4 h-4 text-emerald-500 border-white/40 rounded bg-white/10 focus:ring-emerald-400"
+                      />
+                      <span className="text-sm text-emerald-50">Remember me</span>
+                    </label>
+                    <Link
+                      to="/forget-password"
+                      className="text-sm text-emerald-300 hover:text-emerald-200 font-medium hover:underline"
+                    >
+                      Forgot Password?
+                    </Link>
+                  </div>
+
+                  <ErrorBox />
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:via-teal-400 hover:to-emerald-500 text-white rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/40 hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none text-sm tracking-wide"
+                  >
+                    {isLoading ? (
+                      <><FaSpinner className="animate-spin" size={16} /> Signing in...</>
+                    ) : (
+                      <>Sign In <FaArrowRight size={12} /></>
+                    )}
+                  </button>
+
+                  <div className="text-center pt-2">
+                    <p className="text-sm text-emerald-100/90">
+                      Don't have an account?{" "}
+                      <Link to="/admin/signup" className="text-emerald-300 font-semibold hover:underline">
+                        Create Account
+                      </Link>
+                    </p>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleOtpSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-100/90 mb-1.5">
+                      Verification Code
+                    </label>
+                    <input
+                      type="text" name="otp_code" value={otpCode}
+                      onChange={handleChange}
+                      placeholder="• • • • • •"
+                      className="w-full px-4 py-4 text-center text-2xl font-bold tracking-[0.4em] border border-white/25 rounded-xl bg-white/10 text-white placeholder-emerald-100/50 focus:outline-none focus:ring-2 focus:ring-emerald-300/60 focus:border-emerald-300/80 focus:bg-white/15 transition-all backdrop-blur-md"
+                      maxLength={6} required autoFocus
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-xs text-emerald-100/70">Didn't get the code?</span>
+                      <button
+                        type="button"
+                        onClick={handleResend}
+                        disabled={resendCooldown > 0 || isResending}
+                        className="text-xs font-semibold text-emerald-300 hover:text-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        {isResending ? (
+                          <><FaSpinner className="animate-spin" size={10} /> Sending…</>
+                        ) : resendCooldown > 0 ? (
+                          <>Resend in {resendCooldown}s</>
+                        ) : (
+                          <><FaRedo size={10} /> Resend OTP</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <ErrorBox />
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:via-teal-400 hover:to-emerald-500 text-white rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/40 hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none text-sm tracking-wide"
+                  >
+                    {isLoading ? (
+                      <><FaSpinner className="animate-spin" size={16} /> Verifying...</>
+                    ) : (
+                      <>Verify & Sign In <FaArrowRight size={12} /></>
+                    )}
+                  </button>
+
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    onClick={backToLogin}
+                    className="w-full py-2.5 text-emerald-100/80 hover:text-emerald-300 transition-colors text-sm flex items-center justify-center gap-1.5 group font-medium"
                   >
-                    {showPassword ? <FaEyeSlash size={18} /> : <FaEye size={18} />}
+                    <FaArrowLeft size={11} className="group-hover:-translate-x-1 transition-transform" />
+                    Back to login
                   </button>
-                </div>
-              </div>
-
-              {/* Remember Me & Forgot Password */}
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                  />
-                  <span className="text-sm text-gray-600">Remember me</span>
-                </label>
-                <Link to="/admin/forgot-password" className="text-sm text-purple-600 hover:underline transition-colors">
-                  Forgot Password?
-                </Link>
-              </div>
-
-              {/* Error Message */}
-              {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 animate-shake">
-                  <FaExclamationCircle className="text-red-500" size={16} />
-                  <span className="text-red-600 text-sm">{error}</span>
-                </div>
+                </form>
               )}
 
-              {/* Login Button */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none"
-              >
-                {isLoading ? (
-                  <>
-                    <FaSpinner className="animate-spin" size={18} />
-                    Signing in...
-                  </>
-                ) : (
-                  <>
-                    Sign In
-                    <FaArrowRight size={14} />
-                  </>
-                )}
-              </button>
-
-              {/* Sign Up Link */}
-              <div className="text-center pt-4">
-                <p className="text-sm text-gray-600">
-                  Don't have an account?{" "}
-                  <Link to="/admin/signup" className="text-purple-600 font-medium hover:underline transition-colors">
-                    Create Account
-                  </Link>
-                </p>
-              </div>
-            </form>
-          ) : (
-            <form onSubmit={handleOtpSubmit} className="space-y-5">
-              {/* OTP Field */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Verification Code
-                </label>
-                <input
-                  type="text"
-                  name="otp_code"
-                  value={otpData.otp_code}
-                  onChange={handleChange}
-                  placeholder="Enter 6-digit OTP"
-                  className="w-full px-4 py-3 text-center text-2xl tracking-widest border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-gray-50 focus:bg-white"
-                  maxLength={6}
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-2 text-center">
-                  Didn't receive the code? Check your email or spam folder
-                </p>
-              </div>
-
-              {/* Error Message */}
-              {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 animate-shake">
-                  <FaExclamationCircle className="text-red-500" size={16} />
-                  <span className="text-red-600 text-sm">{error}</span>
+              <div className="mt-6 pt-5 border-t border-white/15 flex items-center justify-center gap-4 text-[11px] text-emerald-100/70">
+                <div className="flex items-center gap-1.5">
+                  <FaShieldAlt size={10} className="text-emerald-300" /><span>Secure</span>
                 </div>
-              )}
-
-              {/* Verify Button */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none"
-              >
-                {isLoading ? (
-                  <>
-                    <FaSpinner className="animate-spin" size={18} />
-                    Verifying...
-                  </>
-                ) : (
-                  <>
-                    Verify & Sign In
-                    <FaArrowRight size={14} />
-                  </>
-                )}
-              </button>
-
-              {/* Back to Login */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowOtpForm(false);
-                  setError(null);
-                  setOtpData({ otp_code: "" });
-                }}
-                className="w-full py-2.5 text-gray-500 hover:text-purple-600 transition-colors text-sm flex items-center justify-center gap-1 group"
-              >
-                <FaArrowLeft size={12} className="group-hover:-translate-x-1 transition-transform" />
-                Back to login
-              </button>
-            </form>
-          )}
-        </div>
-
-        {/* Card Footer */}
-        <div className="bg-gray-50 px-6 py-3 text-center border-t border-gray-100">
-          <div className="flex items-center justify-center gap-4 text-xs text-gray-400">
-            <div className="flex items-center gap-1">
-              <FaShieldAlt size={10} />
-              <span>Secure</span>
-            </div>
-            <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
-            <div className="flex items-center gap-1">
-              <FaCheckCircle size={10} />
-              <span>Encrypted</span>
-            </div>
-            <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
-            <div className="flex items-center gap-1">
-              <FaUserShield size={10} />
-              <span>Protected</span>
+                <div className="w-1 h-1 bg-emerald-200/40 rounded-full" />
+                <div className="flex items-center gap-1.5">
+                  <FaCheckCircle size={10} className="text-emerald-300" /><span>Encrypted</span>
+                </div>
+                <div className="w-1 h-1 bg-emerald-200/40 rounded-full" />
+                <div className="flex items-center gap-1.5">
+                  <FaBolt size={10} className="text-emerald-300" /><span>EV Powered</span>
+                </div>
+              </div>
             </div>
           </div>
+
+          <p className="mt-4 text-center text-xs text-white/70 drop-shadow-md">
+            © {new Date().getFullYear()} Charger on Wheels. All rights reserved.
+          </p>
         </div>
-      </div>
+      </main>
 
       <style>{`
-        @keyframes slideDown {
-          from {
-            opacity: 0;
-            transform: translateY(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
-          20%, 40%, 60%, 80% { transform: translateX(2px); }
-        }
-        .animate-slideDown {
-          animation: slideDown 0.3s ease-out;
-        }
-        .animate-fadeInUp {
-          animation: fadeInUp 0.5s ease-out;
-        }
-        .animate-shake {
-          animation: shake 0.5s ease-in-out;
-        }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInUp  { from { opacity: 0; transform: translateY(30px); }  to { opacity: 1; transform: translateY(0); } }
+        @keyframes shake     { 0%,100% { transform: translateX(0); } 10%,30%,50%,70%,90% { transform: translateX(-2px); } 20%,40%,60%,80% { transform: translateX(2px); } }
+        .animate-slideDown { animation: slideDown 0.3s ease-out; }
+        .animate-fadeInUp  { animation: fadeInUp 0.5s ease-out; }
+        .animate-shake     { animation: shake 0.5s ease-in-out; }
       `}</style>
     </div>
   );

@@ -1,129 +1,176 @@
-// src/App.js
-import React from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
-import HomePage from './components/Home';
-import AboutPage from './components/About';
-import NewsPage from './components/News';
-import Solution from './components/Solution';
-import Contact  from './components/Contact';
-import ApartmentBuildings from './components/Apartmentbuildings';
-import Workplace from './components/Workplace';
-import PublicPlace from './components/PublicPlaces';
-import FleetOrganization from './components/FleetOrganization';
-import Work from './components/work';
-import Signup from './components/User/Signup';
-import Login from './components/User/Login';
-import ForgotPasswordPage from './components/User/ForgetPassword';
-import UserProfile from './components/User/User_Profile';
-import UserNavbar from './components/User/User_Navbar';
-import UserSidebar from './components/User/User_sidebar';
-import Dashboard from './components/User/Dashboard';
-import AdminSignup from './components/Admin/Signup';
-import AdminLogin from './components/Admin/Login';
-import AdminForgetPassword from './components/Admin/ForgetPassword';
-import AdminDashboard from './components/Admin/Admindashboard';
-import AdminProfile from './components/Admin/AdminProfile';
-import AddProduct from './components/Admin/Product/AddProduct';
-import ManageProducts from './components/Admin/Product/ManageProducts';
-import DelistedProducts from './components/Admin/Product/DelistedProducts';
-import ProductView from './components/Admin/Product/ProductView';
-import ProductEdit from './components/Admin/Product/ProductEdit';
-import Product from './components/User/Products/Product';
-import Cart from './components/User/Cart/Cart';
-import UserOrder from './components/User/Order/Order';
-import Address from './components/User/Address';
-import Setting from './components/User/Settings/Setting';
-import ManageUser from './components/Admin/Users/ViewUser';
-import ManageOrder from './components/Admin/AdminOrder/ManageOrder';
-import Adminsetting from './components/Admin/Settings/Adminsetting';
-import AdminReports from './components/Admin/Report/Report';
-import ViewDelistedProduct from './components/Admin/Product/ViewDelistedProduct';
-import HRMS from './components/HRMS';
-import Education from './components/Education';
-import Hospital from './components/Hospital';
-import Job from './components/Job';
-import Cms from './components/cms';
-import Ecom from './components/Ecom';
-import Park from './components/Park';
-import Food from './components/Food';
-import CRM from './components/CRM';
-import Privacy from './components/PrivacyStatement';
-import Terms from './components/TermsandConditions';
-import IndustrialSupport from './components/IndustriesSupport';
-import { Image } from 'lucide-react';
-import VerifyEmail from './components/User/VerifyEmail';
-import AdminRefunds from './components/Admin/Refund/Refund';
-import CancellationPolicy from './components/CancellationandRefundPolicy';
-import ShippingPolicy from './components/ShippingPolicy'
-import AdminSupport from './components/Admin/Support'
-import Blog from './components/Blog';
-import DurgapurBlog from './components/Bhingeemore';
-function App() {
+// src/App.jsx
+// ✅ Inline AuthProvider + useAuth — no separate AuthContext.jsx needed
+// ✅ Login / ForgetPassword / Settings pages are fully self-contained
+// ✅ Other components can import useAuth from '../../App' if needed
+//    (or keep using AuthContext.jsx — both work)
+
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+
+// Self-contained pages (no services/context imports)
+import LoginPage from "./components/Admin/Login";
+import ForgetPassword from "./components/Admin/ForgetPassword";
+import Settings from "./components/Admin/Settings";
+
+// Other admin pages
+import AdminLayout from "./components/Admin/AdminLayout";
+import Dashboard from "./components/Admin/Dashboard";
+import Users from "./components/Admin/Users";
+import Drivers from "./components/Admin/Drivers";
+import Vehicles from "./components/Admin/Vehicles";
+import Bookings from "./components/Admin/Bookings";
+import Pricing from "./components/Admin/Pricing";
+import Reports from "./components/Admin/Reports";
+import AccessControl from './components/Admin/Rbac';
+import Chargers from './components/Admin/Chargers';
+import Pairings from './components/Admin/Pairings';
+/* ==================== INLINE AUTH LAYER ==================== */
+const ACCESS_KEY  = "access_token";
+const REFRESH_KEY = "refresh_token";
+const USER_KEY    = "admin_user";
+const BASE_URL    = "https://dev-evcowbbe.transev.site";
+
+const AuthContext = createContext(null);
+
+function readUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function isAuthenticated() {
+  return Boolean(localStorage.getItem(ACCESS_KEY) || readUser());
+}
+
+function clearAuth() {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+export function AuthProvider({ children }) {
+  const [user, setUser]       = useState(null);
+  const [token, setToken]     = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const syncAuth = useCallback(() => {
+    const t = localStorage.getItem(ACCESS_KEY);
+    const u = readUser();
+    setToken(t);
+    setUser(u);
+    return { token: t, user: u };
+  }, []);
+
+  useEffect(() => {
+    syncAuth();
+    setLoading(false);
+  }, [syncAuth]);
+
+  const logout = useCallback(async () => {
+    try {
+      const t = localStorage.getItem(ACCESS_KEY);
+      await fetch(`${BASE_URL}/api/v1/admin/auth/logout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+        },
+        body: JSON.stringify({}),
+      });
+    } catch { /* ignore */ }
+    clearAuth();
+    setToken(null);
+    setUser(null);
+  }, []);
+
+  const value = {
+    user,
+    token,
+    loading,
+    isAuthenticated: Boolean(user || token),
+    logout,
+    syncAuth,
+    clearAuth,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
+  return ctx;
+}
+
+/* ==================== ROUTE GUARDS ==================== */
+function SplashLoading() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="/news" element={<NewsPage />} />
-        <Route path="/solution" element={<Solution />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/solutions/home-and-housing-societies" element={<ApartmentBuildings />} />
-        <Route path="/solutions/office-and-workplace" element={<Workplace />} />
-        <Route path="/solutions/public-places" element={<PublicPlace />} />
-        <Route path="/solutions/fleet-organization" element={<FleetOrganization />} />
-        <Route path="/how-we-work" element={<Work />} />
-        <Route path="/signup" element={<Signup />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/profile" element={<UserProfile />} /> 
-        <Route path="/usernavbar" element={<UserNavbar />} />
-        <Route path="/usersidebar" element={<UserSidebar />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/admin/signup" element={<AdminSignup/>} />
-        <Route path="/admin/login" element={<AdminLogin />} />
-        <Route path="/admin/forgot-password" element={<AdminForgetPassword />} /> 
-        <Route path="/admin/dashboard" element={<AdminDashboard />} /> 
-        <Route path="/admin/profile" element={<AdminProfile />} /> 
-        <Route path="/add-product" element={<AddProduct />} /> 
-        <Route path="/manage/products" element={<ManageProducts />} /> 
-        <Route path="/admin/delisted-products" element={<DelistedProducts />} /> 
-        <Route path="/admin/product/view/:id" element={<ProductView />} /> {/* Product View Page */}
-        <Route path="/admin/product/edit/:id" element={<ProductEdit />} /> {/* Product Edit Page */}
-        <Route path="/products" element={<Product />} /> 
-        <Route path="/cart" element={<Cart />} /> 
-        <Route path="/order" element={<UserOrder />} /> 
-        <Route path="/address" element={<Address />} /> 
-        <Route path="/setting" element={<Setting />} /> 
-        <Route path="/admin/users" element={<ManageUser />} /> 
-        <Route path="/admin/orders" element={<ManageOrder />} /> 
-        <Route path="/admin/settings" element={<Adminsetting />} /> 
-        <Route path="/admin/report" element={<AdminReports />} /> 
-        <Route path="/admin/delistproduct/view/:id" element={<ViewDelistedProduct />} /> 
-        <Route path="/hrms" element={<HRMS/>} /> 
-        <Route path="/education" element={<Education/>} /> 
-        <Route path="/health" element={<Hospital/>} /> 
-        <Route path="/job" element={<Job/>} /> 
-        <Route path="/charger" element={<Cms/>} /> 
-        <Route path="/e-com" element={<Ecom/>} /> 
-        <Route path="/park" element={<Park/>} /> 
-        <Route path="/food" element={<Food/>} /> 
-        <Route path="/crm" element={<CRM/>} /> 
-        <Route path="/privacy-policy" element={<Privacy/>} /> 
-        <Route path="/terms-conditions" element={<Terms/>} /> 
-         <Route path="/industrialsupport" element={<IndustrialSupport/>} />
-           <Route path="/verify-email" element={<VerifyEmail/>} />
-              <Route path="/admin-refunds" element={<AdminRefunds/>} />
-                <Route path="/cancellation-policy" element={<CancellationPolicy/>} />
-              <Route path="/shipping-policy" element={<ShippingPolicy/>} />
-                <Route path="/admin/support" element={<AdminSupport/>} />
-                <Route path="/blog" element={<Blog/>} />
-                    <Route path="/durgapur-bhiringee-more" element={<DurgapurBlog/>} />
-         </Routes>
-    </Router>
+    <div className="min-h-screen flex items-center justify-center bg-slate-950">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 rounded-full border-4 border-emerald-500/30 border-t-emerald-400 animate-spin" />
+        <p className="text-slate-400 text-xs font-semibold tracking-wider uppercase">Loading…</p>
+      </div>
+    </div>
   );
 }
 
-export default App;
+function ProtectedRoute() {
+  const { loading } = useAuth();
+  if (loading) return <SplashLoading />;
+  if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  return <Outlet />;
+}
 
+function PublicRoute() {
+  const { loading } = useAuth();
+  if (loading) return <SplashLoading />;
+  if (isAuthenticated()) return <Navigate to="/dashboard" replace />;
+  return <Outlet />;
+}
 
+function RootRedirect() {
+  const { loading } = useAuth();
+  if (loading) return <SplashLoading />;
+  return <Navigate to={isAuthenticated() ? "/dashboard" : "/login"} replace />;
+}
 
+/* ==================== APP ==================== */
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<RootRedirect />} />
+
+          <Route element={<PublicRoute />}>
+            <Route path="/login"                 element={<LoginPage />} />
+            <Route path="/forget-password"       element={<ForgetPassword />} />
+            <Route path="/forgot-password"       element={<ForgetPassword />} />
+            <Route path="/admin/forget-password" element={<ForgetPassword />} />
+            <Route path="/admin/forgot-password" element={<ForgetPassword />} />
+          </Route>
+
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<AdminLayout />}>
+              <Route path="dashboard"         element={<Dashboard />} />
+              <Route path="admin/dashboard"   element={<Dashboard />} />
+              <Route path="users"             element={<Users />} />
+              <Route path="drivers"           element={<Drivers />} />
+              <Route path="vehicles"          element={<Vehicles />} />
+              <Route path="bookings"          element={<Bookings />} />
+              <Route path="pricing"          element={<Pricing />} />
+              <Route path="reports"           element={<Reports />} />
+              <Route path="settings"          element={<Settings />} />
+              <Route path="rbac"              element={<AccessControl />} />
+              <Route path="chargers"          element={<Chargers />} />
+              <Route path="pairings"          element={<Pairings />} />
+            </Route>
+          </Route>
+
+          <Route path="*" element={<RootRedirect />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
