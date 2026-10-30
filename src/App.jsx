@@ -24,6 +24,7 @@ import Reports from "./components/Admin/Reports";
 import AccessControl from './components/Admin/Rbac';
 import Chargers from './components/Admin/Chargers';
 import Pairings from './components/Admin/Pairings';
+import Payments from './components/Admin/Payments';
 /* ==================== INLINE AUTH LAYER ==================== */
 const ACCESS_KEY  = "access_token";
 const REFRESH_KEY = "refresh_token";
@@ -165,6 +166,7 @@ export default function App() {
               <Route path="rbac"              element={<AccessControl />} />
               <Route path="chargers"          element={<Chargers />} />
               <Route path="pairings"          element={<Pairings />} />
+              <Route path="payments"          element={<Payments />} />
             </Route>
           </Route>
 

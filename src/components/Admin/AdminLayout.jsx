@@ -38,6 +38,7 @@ const NAV_SECTIONS = [
       { to: "/chargers", label: "Chargers",         icon: Plug },
       { to: "/pairings", label: "Pairings",         icon: Link2 },
       { to: "/users",    label: "Customers",        icon: Truck },
+     
     ],
   },
   {
