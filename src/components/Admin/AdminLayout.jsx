@@ -244,7 +244,7 @@ export default function AdminLayout() {
                 <Zap className="h-4 w-4 text-white" fill="white" />
               </div>
             </div>
-            {!collapsed && (
+            {!collapsed && (  
               <div className="leading-tight">
                 <div className={`text-sm font-black tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
                   Charger
