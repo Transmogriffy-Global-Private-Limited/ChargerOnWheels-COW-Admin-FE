@@ -25,11 +25,14 @@ import AccessControl from './components/Admin/Rbac';
 import Chargers from './components/Admin/Chargers';
 import Pairings from './components/Admin/Pairings';
 import Payments from './components/Admin/Payments';
+import Zones from './components/Admin/Zones';
+import Commercial from './components/Admin/Commercial';
+import Recruitment from './components/Admin/Recruitment';
 /* ==================== INLINE AUTH LAYER ==================== */
 const ACCESS_KEY  = "access_token";
 const REFRESH_KEY = "refresh_token";
 const USER_KEY    = "admin_user";
-const BASE_URL    = "https://dev-evcowbbe.transev.site";
+const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "";
 
 const AuthContext = createContext(null);
 
@@ -167,6 +170,9 @@ export default function App() {
               <Route path="chargers"          element={<Chargers />} />
               <Route path="pairings"          element={<Pairings />} />
               <Route path="payments"          element={<Payments />} />
+              <Route path="zones"             element={<Zones />} />
+              <Route path="commercial"        element={<Commercial />} />
+              <Route path="applications"      element={<Recruitment />} />
             </Route>
           </Route>
 

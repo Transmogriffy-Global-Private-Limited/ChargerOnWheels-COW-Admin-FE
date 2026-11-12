@@ -270,7 +270,7 @@ export default function Payments() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-12 text-center text-slate-500 dark:text-slate-500">
-                    No payments found for the current filters.
+                    No Payments found for the current filters.
                   </td>
                 </tr>
               )}

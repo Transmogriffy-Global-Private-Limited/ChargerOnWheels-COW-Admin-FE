@@ -9,7 +9,7 @@
 // } from "react-icons/fa";
 
 // /* ==================== INLINE API LAYER ==================== */
-// const BASE_URL    = "https://dev-evcowbbe.transev.site";
+// const BASE_URL    = "http://192.168.0.101:18080";
 // const ACCESS_KEY  = "access_token";
 // const REFRESH_KEY = "refresh_token";
 // const USER_KEY    = "admin_user";
@@ -1598,7 +1598,7 @@
 // } from "react-icons/fa";
 
 // /* ==================== INLINE API LAYER ==================== */
-// const BASE_URL    = "https://dev-evcowbbe.transev.site";
+// const BASE_URL    = "http://192.168.0.101:18080";
 // const ACCESS_KEY  = "access_token";
 // const REFRESH_KEY = "refresh_token";
 // const USER_KEY    = "admin_user";
@@ -3271,7 +3271,7 @@ import {
 } from "react-icons/fa";
 
 /* ==================== INLINE API LAYER ==================== */
-const BASE_URL    = "https://dev-evcowbbe.transev.site";
+const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "";
 const ACCESS_KEY  = "access_token";
 const REFRESH_KEY = "refresh_token";
 const USER_KEY    = "admin_user";

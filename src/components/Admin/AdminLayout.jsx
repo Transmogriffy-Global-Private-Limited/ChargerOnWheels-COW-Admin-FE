@@ -1,5 +1,5 @@
 // src/components/Admin/AdminLayout.jsx
-import { useState, useEffect, useRef } from "react";
+import { createElement, useState, useEffect, useRef } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Truck, BatteryCharging, CalendarCheck,
@@ -9,6 +9,9 @@ import {
   Plug,                        // ✅ for Chargers
   Link2,                       // ✅ for Pairings
   DollarSign,                  // ✅ NEW — for Pricing
+  Map,
+  Library,
+  UserCheck,
 } from "lucide-react";
 import { useAuth } from "../../App";
 
@@ -37,6 +40,7 @@ const NAV_SECTIONS = [
       { to: "/vehicles", label: "Service Vehicles", icon: BatteryCharging },
       { to: "/chargers", label: "Chargers",         icon: Plug },
       { to: "/pairings", label: "Pairings",         icon: Link2 },
+      { to: "/zones",    label: "Zones",            icon: Map },
       { to: "/users",    label: "Customers",        icon: Truck },
      
     ],
@@ -46,6 +50,7 @@ const NAV_SECTIONS = [
     items: [
       { to: "/payments", label: "Payments", icon: Wallet },
       { to: "/pricing",  label: "Pricing",  icon: DollarSign },   // ✅ NEW
+      { to: "/commercial", label: "Commercial", icon: Library },
       { to: "/reports",  label: "Reports",  icon: BarChart3 },
     ],
   },
@@ -54,6 +59,7 @@ const NAV_SECTIONS = [
     items: [
       { to: "/settings", label: "Settings",       icon: Settings },
       { to: "/rbac",     label: "Access Control", icon: Shield },
+      { to: "/applications", label: "Recruitment", icon: UserCheck },
     ],
   },
 ];
@@ -309,11 +315,11 @@ export default function AdminLayout() {
                           {isActive && (
                             <span className={`absolute left-0 top-1/2 -translate-y-1/2 h-6 w-[3px] rounded-r-full ${p.navActiveBar}`} />
                           )}
-                          <Icon
-                            className={`h-[18px] w-[18px] shrink-0 transition-all duration-200 ${
+                          {createElement(Icon, {
+                            className: `h-[18px] w-[18px] shrink-0 transition-all duration-200 ${
                               isActive ? p.navIconActive : p.navIconIdle
-                            }`}
-                          />
+                            }`,
+                          })}
                           {!collapsed && <span className="truncate">{label}</span>}
                         </>
                       )}
@@ -487,7 +493,7 @@ export default function AdminLayout() {
                       onClick={() => { setProfileOpen(false); navigate(to); }}
                       className={`flex items-center gap-2.5 w-full text-left rounded-lg px-3 py-2 text-sm transition-colors ${p.dropdownItem}`}
                     >
-                      <Icon size={14} className={p.dropdownIcon} />
+                      {createElement(Icon, { size: 14, className: p.dropdownIcon })}
                       {label}
                     </button>
                   ))}
