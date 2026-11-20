@@ -3,7 +3,7 @@ const REFRESH_KEY = "refresh_token";
 const USER_KEY = "admin_user";
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "";
+  import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
 
 export class AdminApiError extends Error {
   constructor(message, { status, code, details, payload } = {}) {
@@ -53,7 +53,7 @@ async function refreshSession() {
   const refreshToken = localStorage.getItem(REFRESH_KEY);
   if (!refreshToken) return false;
 
-  const response = await fetch(`${API_BASE_URL}/api/v1/admin/auth/refresh`, {
+  const response = await fetch(`${API_BASE_URL}/v1/admin/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ refresh_token: refreshToken }),
@@ -106,7 +106,7 @@ export async function adminApiRequest(path, options = {}) {
     const token = auth ? localStorage.getItem(ACCESS_KEY) : null;
     const headers = { ...requestHeaders };
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetch(`${API_BASE_URL}${path}`, {
+    return fetch(`${API_BASE_URL}${path.replace(/^\/api(?=\/)/, "")}`, {
       method,
       headers,
       body:

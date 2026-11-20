@@ -32,7 +32,7 @@ import Recruitment from './components/Admin/Recruitment';
 const ACCESS_KEY  = "access_token";
 const REFRESH_KEY = "refresh_token";
 const USER_KEY    = "admin_user";
-const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "";
+const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
 
 const AuthContext = createContext(null);
 
@@ -74,7 +74,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       const t = localStorage.getItem(ACCESS_KEY);
-      await fetch(`${BASE_URL}/api/v1/admin/auth/logout`, {
+      await fetch(`${BASE_URL}/v1/admin/auth/logout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -24,7 +24,7 @@ function Navbar() {
   const [userRole, setUserRole] = useState(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   
-  const BASE_URL_AND_PORT = "https://api.static.ev.transev.site";
+  const BASE_URL_AND_PORT = import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
   const API_KEY = "mlzuMoRFjdGhcFulLMaVtfwNAHycbBAf";
   const solutionCaptions = ['Home and Housing Societies', 'Office and Workplace', 'Public Places', 'Fleet Organization'];
   const aboutCaptions = ['Who we are', 'How we work'];

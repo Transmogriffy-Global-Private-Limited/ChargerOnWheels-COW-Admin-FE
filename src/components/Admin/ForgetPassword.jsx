@@ -6,7 +6,7 @@ import {
 } from "react-icons/fa";
 
 /* ==================== INLINE API LAYER ==================== */
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
 const ACCESS_KEY = "access_token";
 
 async function apiRequest(path, { method = "GET", body } = {}) {
@@ -14,7 +14,7 @@ async function apiRequest(path, { method = "GET", body } = {}) {
   const timer = setTimeout(() => controller.abort(), 30000);
   let res;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetch(`${BASE_URL}${path.replace(/^\/api(?=\/)/, "")}`, {
       method,
       headers: { "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,

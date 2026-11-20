@@ -10,7 +10,7 @@
 // } from "react-icons/fa";
 
 // /* ==================== INLINE API LAYER ==================== */
-// const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "";
+// const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
 // const ACCESS_KEY  = "access_token";
 // const REFRESH_KEY = "refresh_token";
 // const USER_KEY    = "admin_user";
@@ -67,7 +67,7 @@
 //     const refreshTok = getRefreshToken();
 //     if (!refreshTok) return false;
 //     try {
-//       const res = await fetch(`${BASE_URL}/api/v1/admin/auth/refresh`, {
+//       const res = await fetch(`${BASE_URL}/v1/admin/auth/refresh`, {
 //         method: "POST",
 //         headers: { "Content-Type": "application/json", Accept: "application/json" },
 //         body: JSON.stringify({ refresh_token: refreshTok }),
@@ -106,7 +106,7 @@
 //     const timer = setTimeout(() => controller.abort(), 30000);
 //     let res;
 //     try {
-//       res = await fetch(`${BASE_URL}${path}`, {
+//       res = await fetch(`${BASE_URL}${path.replace(/^\/api(?=\/)/, "")}`, {
 //         method, headers,
 //         body: body !== undefined ? JSON.stringify(body) : undefined,
 //         signal: controller.signal,
@@ -1753,7 +1753,7 @@ import {
 } from "react-icons/fa";
 
 /* ==================== INLINE API LAYER ==================== */
-const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "";
+const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
 const ACCESS_KEY  = "access_token";
 const REFRESH_KEY = "refresh_token";
 const USER_KEY    = "admin_user";
@@ -1802,7 +1802,7 @@ async function tryRefreshToken() {
     const refreshTok = getRefreshToken();
     if (!refreshTok) return false;
     try {
-      const res = await fetch(`${BASE_URL}/api/v1/admin/auth/refresh`, {
+      const res = await fetch(`${BASE_URL}/v1/admin/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ refresh_token: refreshTok }),
@@ -1841,7 +1841,7 @@ async function apiRequest(path, { method = "GET", body, auth = true, extraHeader
     const timer = setTimeout(() => controller.abort(), 30000);
     let res;
     try {
-      res = await fetch(`${BASE_URL}${path}`, {
+      res = await fetch(`${BASE_URL}${path.replace(/^\/api(?=\/)/, "")}`, {
         method, headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -1957,7 +1957,13 @@ const extractTariffs = extractZones;
 function extractHistory(res) {
   if (!res) return [];
   if (Array.isArray(res)) return res;
-  return toArray(res.history || res.events || res.items || res.data?.history || res.data?.events || res.data || []);
+  const entries = res.history || res.events || res.items || res.data?.history || res.data?.events;
+  if (entries) return toArray(entries);
+  // The zones API currently exposes the zone record by ID, but not a /history route.
+  // Keep that record visible in the History panel when the backend returns it directly.
+  const payload = res.data && !Array.isArray(res.data) ? res.data : res;
+  const record = payload.zone || payload.item || payload;
+  return record && typeof record === "object" ? [{ ...record, _zoneRecord: true }] : [];
 }
 
 function zoneStatus(z) {
@@ -2693,7 +2699,7 @@ function DetailDrawer({ policy, onClose, onRefresh }) {
     if (!policyId) return;
     setLoadingH(true); setErrorH(null);
     try {
-      const res = await apiRequest(`${ZONES_BASE}/${policyId}/history`);
+      const res = await apiRequest(`${ZONES_BASE}/${policyId}`);
       setHistory(extractHistory(res));
     } catch (err) { setErrorH(err.message); }
     finally { setLoadingH(false); }
@@ -2813,7 +2819,7 @@ function DetailDrawer({ policy, onClose, onRefresh }) {
                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-slate-900">
-                            {h.event_type || h.type || h.action || "Event"}
+                            {h._zoneRecord ? "Zone details" : (h.event_type || h.type || h.action || "Event")}
                           </span>
                           <span className="text-[10px] text-slate-500">
                             {fmtDate(h.created_at || h.timestamp || h.at)}
@@ -2822,6 +2828,53 @@ function DetailDrawer({ policy, onClose, onRefresh }) {
                         {h.actor && <p className="text-[10px] text-slate-600 mt-0.5">By: {h.actor}</p>}
                         {h.message && <p className="text-[11px] text-slate-700 mt-1">{h.message}</p>}
                         {h.reason && <p className="text-[11px] text-slate-700 mt-1 italic">"{h.reason}"</p>}
+                        {h._zoneRecord && (() => {
+                          const location = [h.center_latitude ?? h.latitude, h.center_longitude ?? h.longitude]
+                            .filter((value) => value != null && value !== "")
+                            .map((value) => Number.isFinite(Number(value)) ? Number(value).toFixed(5) : value)
+                            .join(", ");
+                          const fields = [
+                            ["Zone key", h.zone_key || h.policy_key || h.key],
+                            ["Version", h.version ?? h.policy_version],
+                            ["Restriction mode", h.restriction_mode || h.mode],
+                            ["Center coordinates", location || null],
+                            ["Coverage radius", h.radius_m != null ? `${h.radius_m} m` : null],
+                            ["Starts", h.starts_at ? fmtDate(h.starts_at) : null],
+                            ["Ends", h.ends_at ? fmtDate(h.ends_at) : null],
+                            ["Created", h.created_at ? fmtDate(h.created_at) : null],
+                            ["Created by", h.created_by_id || h.created_by],
+                          ].filter(([, value]) => value != null && value !== "");
+                          const status = zoneStatus(h);
+                          const statusColors = statusStyle(status);
+                          return (
+                            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-extrabold text-slate-900 truncate">{h.name || h.zone_key || h.policy_key || "Service zone"}</p>
+                                  <p className="mt-0.5 text-[10px] text-slate-500">Zone record · ID {shortId(h.id || h.zone_id || policyId)}</p>
+                                </div>
+                                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider bg-gradient-to-r ${statusColors.bg} text-white`}>
+                                  {statusColors.label}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-px bg-slate-100">
+                                {fields.map(([label, value]) => (
+                                  <div key={label} className="min-w-0 bg-white px-3 py-2.5">
+                                    <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+                                    <p className="mt-1 break-words text-[11px] font-semibold text-slate-700">{value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                              {h.reason && <div className="border-t border-slate-100 bg-indigo-50/50 px-3 py-3">
+                                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Reason</p>
+                                <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">{h.reason}</p>
+                              </div>}
+                            </div>
+                          );
+                        })()}
+                        {!h._zoneRecord && !h.message && !h.reason && !h.actor && (
+                          <p className="mt-2 text-[11px] text-slate-500">No additional event details.</p>
+                        )}
                       </div>
                     </li>
                   ))}

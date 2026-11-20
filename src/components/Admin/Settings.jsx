@@ -7,7 +7,7 @@ import {
 } from "react-icons/fa";
 
 /* ==================== INLINE API LAYER ==================== */
-const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "";
+const BASE_URL    = import.meta.env.VITE_API_BASE_URL || "https://dev-evcowbbe.transev.site/api";
 const ACCESS_KEY  = "access_token";
 const REFRESH_KEY = "refresh_token";
 const USER_KEY    = "admin_user";
@@ -45,7 +45,7 @@ async function apiRequest(path, { method = "GET", body, auth = true } = {}) {
 
   let res;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetch(`${BASE_URL}${path.replace(/^\/api(?=\/)/, "")}`, {
       method, headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
